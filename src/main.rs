@@ -4,7 +4,11 @@ use mini_deck::{
     keyboard::KeyboardBackend,
     server::{router, AppState},
 };
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    io::{BufRead, IsTerminal},
+    path::PathBuf,
+    sync::Arc,
+};
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     if let Err(error) = run().await {
@@ -26,7 +30,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--lan" => listen = "0.0.0.0:8765".into(),
             "--clear-devices" => clear_devices = true,
             "--help" => {
-                println!("Mini Deck\n--listen IP:端口（默认 127.0.0.1:8765）\n--config 文件路径\n--mock 仅模拟，不注入键盘\n--lan 监听全部 IPv4 网卡（8765）\n--clear-devices 清空已记住的设备后退出（请先停止旧实例）");
+                println!("Mini Deck\n--listen IP:端口（默认 127.0.0.1:8765）\n--config 文件路径\n--mock 仅模拟，不注入键盘\n--lan 监听全部 IPv4 网卡（8765）\n--clear-devices 清空已记住的设备后退出（请先停止旧实例）\n运行时在本机控制台输入 r 并回车，刷新配对码");
                 return Ok(());
             }
             _ => return Err(format!("未知参数：{arg}").into()),
@@ -82,10 +86,43 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     let mut state = AppState::new(config, auth, keyboard, path);
     state.connect_page = Arc::new(mini_deck::connection::page(&urls)?);
+    start_console(&state);
+    let shutdown = state.shutdown.clone();
     axum::serve(listener, router(state))
-        .with_graceful_shutdown(async {
+        .with_graceful_shutdown(async move {
             let _ = tokio::signal::ctrl_c().await;
+            shutdown.send_replace(true);
         })
         .await?;
     Ok(())
+}
+
+fn start_console(state: &AppState) {
+    // 只接受交互式本机终端，不提供网络刷新接口；阻塞输入不占用事件循环。
+    if !std::io::stdin().is_terminal() {
+        return;
+    }
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            if line.trim().eq_ignore_ascii_case("r") && sender.blocking_send(()).is_err() {
+                break;
+            }
+        }
+    });
+    let state = state.clone();
+    println!("本机控制台输入 r 并回车可刷新配对码，已有会话不受影响。");
+    tokio::spawn(async move {
+        while receiver.recv().await.is_some() {
+            let _guard = state.auth_updates.lock().await;
+            let mut auth = state.auth.lock().await;
+            match auth.refresh_code() {
+                Ok(()) => println!("新配对码：{}（10 分钟有效，旧码已失效）", auth.code),
+                Err(error) => eprintln!("配对码刷新失败：{error}"),
+            }
+        }
+    });
 }

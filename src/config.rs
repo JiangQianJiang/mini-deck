@@ -8,6 +8,8 @@ pub struct Button {
     pub name: String,
     pub shortcut: String,
     pub position: u8,
+    #[serde(default)]
+    pub revision: u32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +38,7 @@ impl Default for Config {
                     name: name.to_string(),
                     shortcut: shortcut.to_string(),
                     position: i as u8,
+                    revision: 0,
                 })
                 .collect(),
         }

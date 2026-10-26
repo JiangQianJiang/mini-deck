@@ -45,3 +45,18 @@ fn invalid_configuration() {
     c.buttons[0].shortcut = "shell".into();
     assert!(c.validate().is_err());
 }
+
+#[tokio::test]
+async fn legacy_configuration_defaults_each_revision_without_rewriting() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    let mut value = serde_json::to_value(Config::default()).unwrap();
+    for button in value["buttons"].as_array_mut().unwrap() {
+        button.as_object_mut().unwrap().remove("revision");
+    }
+    let original = serde_json::to_vec(&value).unwrap();
+    tokio::fs::write(&path, &original).await.unwrap();
+    let config = Config::load(&path).await.unwrap();
+    assert!(config.buttons.iter().all(|b| b.revision == 0));
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), original);
+}

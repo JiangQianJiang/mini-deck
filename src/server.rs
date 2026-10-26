@@ -1,4 +1,5 @@
 use crate::{auth::Auth, config::Config, keyboard::KeyboardBackend, shortcut::Shortcut};
+use axum::response::sse::{Event, Sse};
 use axum::{
     extract::{DefaultBodyLimit, Path, State},
     http::{header, HeaderMap, StatusCode},
@@ -7,8 +8,9 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
+use std::{convert::Infallible, time::Duration};
 use std::{path::PathBuf, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex, Semaphore};
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Mutex<Config>>,
@@ -19,6 +21,9 @@ pub struct AppState {
     pub auth_updates: Arc<Mutex<()>>,
     pub connect_page: Arc<String>,
     pub path: PathBuf,
+    pub changes: watch::Sender<()>,
+    pub shutdown: watch::Sender<bool>,
+    pub streams: Arc<Semaphore>,
 }
 impl AppState {
     pub fn new(
@@ -36,6 +41,9 @@ impl AppState {
             auth_updates: Arc::new(Mutex::new(())),
             connect_page: Arc::new(String::from("连接信息尚未初始化")),
             path,
+            changes: watch::channel(()).0,
+            shutdown: watch::channel(false).0,
+            streams: Arc::new(Semaphore::new(32)),
         }
     }
 }
@@ -84,6 +92,15 @@ pub fn router(state: AppState) -> Router {
                 )
             }),
         )
+        .route(
+            "/protocol.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/protocol.js"),
+                )
+            }),
+        )
         .route("/connect", get(connect))
         .route("/api/devices", get(devices))
         .route("/api/devices/{id}", axum::routing::delete(revoke))
@@ -91,6 +108,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/pair", post(pair))
         .route("/api/logout", post(logout))
         .route("/api/buttons", get(buttons))
+        .route("/api/events", get(events))
         .route("/api/buttons/{id}/press", post(press))
         .route("/api/buttons/{id}", put(update))
         .layer(DefaultBodyLimit::max(4096))
@@ -177,9 +195,13 @@ async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<Sta
     let _update = state.auth_updates.lock().await;
     authorize(&state, &headers).await?;
     let mut updated = state.auth.lock().await.clone();
+    let persistent = updated.remembered_token(token(&headers));
     updated.logout(token(&headers));
-    persist_auth(&state, &updated).await?;
+    if persistent {
+        persist_auth(&state, &updated).await?;
+    }
     *state.auth.lock().await = updated;
+    state.changes.send_replace(());
     Ok(StatusCode::NO_CONTENT)
 }
 async fn devices(
@@ -197,11 +219,15 @@ async fn revoke(
     let _update = state.auth_updates.lock().await;
     authorize(&state, &headers).await?;
     let mut updated = state.auth.lock().await.clone();
+    let persistent = updated.remembered_id(&id);
     if !updated.revoke(&id) {
         return Err(error(StatusCode::NOT_FOUND, "设备不存在"));
     }
-    persist_auth(&state, &updated).await?;
+    if persistent {
+        persist_auth(&state, &updated).await?;
+    }
     *state.auth.lock().await = updated;
+    state.changes.send_replace(());
     Ok(StatusCode::NO_CONTENT)
 }
 async fn connect(State(state): State<AppState>) -> axum::response::Html<String> {
@@ -218,6 +244,7 @@ async fn press(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<u8>,
+    Json(body): Json<Revision>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&state, &headers).await?;
     // 忙时直接拒绝，避免无限排队和延迟执行旧请求。
@@ -232,6 +259,7 @@ async fn press(
             .iter()
             .find(|b| b.id == id)
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "按钮不存在"))?;
+        check_revision(button.revision, body.revision)?;
         Shortcut::parse(&button.shortcut)
             .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))?
     };
@@ -244,6 +272,7 @@ async fn press(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Update {
+    revision: u32,
     name: String,
     shortcut: String,
 }
@@ -254,28 +283,102 @@ async fn update(
     Json(body): Json<Update>,
 ) -> Result<StatusCode, ApiError> {
     authorize(&state, &headers).await?;
-    let _update = state.updates.lock().await;
-    let mut updated = state.config.lock().await.clone();
-    let button = updated
-        .buttons
-        .iter_mut()
-        .find(|b| b.id == id)
-        .ok_or_else(|| error(StatusCode::NOT_FOUND, "按钮不存在"))?;
-    button.name = body.name;
-    button.shortcut = body.shortcut;
-    updated
-        .validate()
-        .map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
-    updated
-        .save(&state.path)
-        .await
-        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    *state.config.lock().await = updated;
-    Ok(StatusCode::NO_CONTENT)
+    // 请求断开也完成已接收的保存事务，避免磁盘已替换但内存版本未发布。
+    tokio::spawn(async move {
+        let _update = state.updates.lock().await;
+        let mut updated = state.config.lock().await.clone();
+        let button = updated
+            .buttons
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or_else(|| error(StatusCode::NOT_FOUND, "按钮不存在"))?;
+        check_revision(button.revision, body.revision)?;
+        button.revision = button
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| error(StatusCode::CONFLICT, "按钮版本已用尽"))?;
+        button.name = body.name;
+        button.shortcut = body.shortcut;
+        updated
+            .validate()
+            .map_err(|e| error(StatusCode::BAD_REQUEST, e))?;
+        updated
+            .save(&state.path)
+            .await
+            .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        *state.config.lock().await = updated;
+        state.changes.send_replace(());
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
+    .map_err(|e| {
+        error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("配置更新任务失败：{e}"),
+        )
+    })?
 }
 
 async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(
         serde_json::json!({"ok":true,"platform":std::env::consts::OS,"mock":state.keyboard.is_mock()}),
     )
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Revision {
+    revision: u32,
+}
+fn check_revision(actual: u32, expected: u32) -> Result<(), ApiError> {
+    if actual != expected {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "按钮配置已被其他设备修改，请刷新后确认；未执行按键或覆盖配置",
+        ));
+    }
+    Ok(())
+}
+async fn events(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
+    authorize(&state, &headers).await?;
+    let permit = state
+        .streams
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| error(StatusCode::TOO_MANY_REQUESTS, "同步连接已满"))?;
+    // watch 只保留一次变化信号，慢客户端不积压；初次/重连始终通知完整刷新。
+    let receiver = state.changes.subscribe();
+    let shutdown = state.shutdown.subscribe();
+    let stream = futures_util::stream::unfold(
+        (
+            state,
+            token(&headers).to_owned(),
+            receiver,
+            shutdown,
+            true,
+            permit,
+        ),
+        |(state, token, mut receiver, mut shutdown, first, permit)| async move {
+            if *shutdown.borrow() {
+                return None;
+            }
+            let remaining = state.auth.lock().await.session_remaining(&token)?;
+            if !first {
+                tokio::select! {
+                    _ = shutdown.changed() => { return None; }
+                    changed = receiver.changed() => { changed.ok()?; }
+                    _ = tokio::time::sleep(remaining.min(Duration::from_secs(30 * 86400))) => {}
+                }
+            }
+            if !state.auth.lock().await.valid(&token) {
+                return None;
+            }
+            let event = Event::default().event("config").data("{}");
+            Some((
+                Ok::<_, Infallible>(event),
+                (state, token, receiver, shutdown, false, permit),
+            ))
+        },
+    );
+    Ok(Sse::new(stream).into_response())
 }

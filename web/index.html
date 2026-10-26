@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mini Deck</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mini Deck</title><link rel="stylesheet" href="/style.css"><script src="/protocol.js" defer></script><script src="/app.js" defer></script></head>
 <body><main>
 <header><h1>Mini Deck</h1><p>局域网快捷键控制台</p></header>
 <p id="status" role="status" aria-live="polite">请配对</p>
@@ -18,5 +18,19 @@
 <p class="hint">快捷键作用于电脑当前前台窗口，请先在电脑选中目标应用。</p>
 <details id="device-manager"><summary>管理已配对设备</summary><button id="refresh-devices">刷新列表</button><div id="devices"></div><p class="hint">已配对设备可撤销其他设备。撤销从下一次请求起生效。</p></details>
 </section>
+<dialog id="editor" aria-labelledby="editor-title">
+<form id="editor-form">
+<h2 id="editor-title">编辑按钮</h2>
+<label>名称<input id="button-name" required maxlength="40" autocomplete="off"></label>
+<fieldset id="modifiers"><legend>修饰键（可多选）</legend></fieldset>
+<label>主键<select id="main-key" required></select></label>
+<p>组合预览：<output id="preview" aria-live="polite"></output></p>
+<div class="actions"><button type="button" id="record">录制快捷键</button><button type="button" id="stop-record" hidden>取消录制</button></div>
+<p class="hint">录制仅限此页面，Esc 也可录入。部分系统或浏览器快捷键无法拦截；手机可直接手动选择。</p>
+<p id="editor-error" role="alert"></p>
+<button type="button" id="rebase" hidden>保留草稿，使用最新版本再次确认</button>
+<div class="actions"><button type="submit" id="save-button">保存</button><button type="button" id="cancel-editor">取消</button></div>
+</form>
+</dialog>
 <footer><a href="/connect">查看连接二维码</a> · 仅限可信私人局域网 · HTTP 连接未加密</footer>
 </main></body></html>

@@ -55,6 +55,32 @@ impl Auth {
             sessions: HashMap::new(),
         })
     }
+    /// 仅由本机控制台调用；保留错误计数与冷却时间，刷新不能绕过限流。
+    pub fn refresh_code(&mut self) -> Result<(), String> {
+        let code = loop {
+            let code = random_hex(4)?;
+            if code != self.code {
+                break code;
+            }
+        };
+        self.code = code;
+        self.created = Instant::now();
+        Ok(())
+    }
+    pub fn session_remaining(&mut self, token: &str) -> Option<Duration> {
+        self.prune();
+        self.sessions
+            .get(&digest(token))
+            .map(|s| Duration::from_secs(s.expires_at.saturating_sub(now())))
+    }
+    pub fn remembered_token(&self, token: &str) -> bool {
+        self.sessions
+            .get(&digest(token))
+            .is_some_and(|s| s.remembered)
+    }
+    pub fn remembered_id(&self, id: &str) -> bool {
+        self.sessions.values().any(|s| s.id == id && s.remembered)
+    }
     pub async fn load(path: &Path) -> Result<Self, String> {
         let mut auth = Self::new()?;
         let bytes = match tokio::fs::read(path).await {
@@ -105,7 +131,7 @@ impl Auth {
     ) -> Result<String, String> {
         let instant = Instant::now();
         if self.created.elapsed() > Duration::from_secs(600) {
-            return Err("配对码已过期，请在电脑重启程序".into());
+            return Err("配对码已过期，请在电脑控制台输入 r 并回车刷新".into());
         }
         if self.blocked_until.is_some_and(|until| instant < until) {
             return Err("尝试过多，请稍后再试".into());
@@ -207,6 +233,29 @@ mod tests {
         assert!(auth.pair(&code).is_ok());
         auth.created = Instant::now() - Duration::from_secs(601);
         assert!(auth.pair(&code).is_err());
+    }
+    #[test]
+    fn refresh_invalidates_old_code_preserves_sessions_and_throttling() {
+        let mut auth = Auth::new().unwrap();
+        let old = auth.code.clone();
+        let token = auth.pair(&old).unwrap();
+        auth.created = Instant::now() - Duration::from_secs(601);
+        auth.refresh_code().unwrap();
+        let new = auth.code.clone();
+        assert_ne!(old, new);
+        assert!(auth.valid(&token));
+        assert!(auth.pair(&old).is_err());
+        assert!(auth.pair(&new).is_ok());
+        for _ in 0..4 {
+            assert!(auth.pair("错误").is_err());
+        }
+        auth.refresh_code().unwrap();
+        assert!(auth.pair("错误").is_err());
+        assert!(auth.blocked_until.is_some());
+        auth.refresh_code().unwrap();
+        let new = auth.code.clone();
+        assert!(auth.pair(&new).is_err());
+        assert!(auth.valid(&token));
     }
     #[tokio::test]
     async fn remembered_survives_restart_without_storing_credentials() {

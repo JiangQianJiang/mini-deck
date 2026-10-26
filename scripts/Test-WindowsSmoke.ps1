@@ -41,7 +41,7 @@ try {
     $body = @{code = $code; remember = $true; name = '自动化测试设备'} | ConvertTo-Json
     $pair = Invoke-RestMethod "$base/api/pair" -Method Post -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($body))
     $headers = @{Authorization = "Bearer $($pair.token)"}
-    $null = Invoke-RestMethod "$base/api/buttons/0/press" -Headers $headers -Method Post
+    $null = Invoke-RestMethod "$base/api/buttons/0/press" -Headers $headers -Method Post -ContentType "application/json" -Body '{"revision":0}'
     $connect = Invoke-WebRequest "$base/connect" -UseBasicParsing
     if ($connect.Content -notmatch '<svg') { throw '未生成二维码。' }
     & (Join-Path $PSScriptRoot 'Measure-MiniDeck.ps1') -ProcessId $deckProcess.Id -WarmupSeconds 0 -DurationSeconds 2 -IntervalSeconds 1 -HealthUrl "$base/api/health" -OutputDirectory (Join-Path $directory 'measure')
