@@ -17,24 +17,19 @@ async fn main() {
     }
 }
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let mut listen = "127.0.0.1:8765".to_string();
-    let mut path = std::env::current_exe()?.with_file_name("config.json");
-    let mut mock = false;
-    let mut clear_devices = false;
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--listen" => listen = args.next().ok_or("缺少监听地址")?,
-            "--config" => path = PathBuf::from(args.next().ok_or("缺少配置路径")?),
-            "--mock" => mock = true,
-            "--lan" => listen = "0.0.0.0:8765".into(),
-            "--clear-devices" => clear_devices = true,
-            "--help" => {
-                println!("Mini Deck\n--listen IP:端口（默认 127.0.0.1:8765）\n--config 文件路径\n--mock 仅模拟，不注入键盘\n--lan 监听全部 IPv4 网卡（8765）\n--clear-devices 清空已记住的设备后退出（请先停止旧实例）\n运行时在本机控制台输入 r 并回车，刷新配对码");
-                return Ok(());
-            }
-            _ => return Err(format!("未知参数：{arg}").into()),
-        }
+    let Options {
+        listen,
+        path,
+        mock,
+        clear_devices,
+        help,
+    } = parse_args(
+        std::env::args().skip(1),
+        std::env::current_exe()?.with_file_name("config.json"),
+    )?;
+    if help {
+        println!("Mini Deck\n默认监听全部 IPv4 网卡：0.0.0.0:8765\n--local 仅本机访问（127.0.0.1:8765）\n--lan 监听全部 IPv4 网卡（兼容旧启动脚本）\n--listen IP:端口 指定监听地址\n--config 文件路径\n--mock 仅模拟，不注入键盘\n--clear-devices 清空已记住的设备后退出（请先停止旧实例）\n多个监听参数按从左到右处理，最后一个生效。\n运行时在本机控制台输入 r 并回车，刷新配对码");
+        return Ok(());
     }
     let sessions = mini_deck::auth::session_path(&path);
     if clear_devices {
@@ -81,7 +76,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         bound.ip()
     };
     println!(
-        "电脑打开 http://{}/connect 查看连接二维码。\n手机访问需 --lan 或 --listen 局域网IP:8765。",
+        "电脑打开 http://{}/connect 查看连接二维码。",
         std::net::SocketAddr::new(local_ip, bound.port())
     );
     let mut state = AppState::new(config, auth, keyboard, path);
@@ -95,6 +90,51 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
     Ok(())
+}
+
+struct Options {
+    listen: String,
+    path: PathBuf,
+    mock: bool,
+    clear_devices: bool,
+    help: bool,
+}
+fn parse_args(
+    args: impl IntoIterator<Item = String>,
+    default_path: PathBuf,
+) -> Result<Options, String> {
+    let mut listen = "0.0.0.0:8765".to_string();
+    let mut path = default_path;
+    let mut mock = false;
+    let mut clear_devices = false;
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--listen" => listen = args.next().ok_or("缺少监听地址")?,
+            "--config" => path = PathBuf::from(args.next().ok_or("缺少配置路径")?),
+            "--mock" => mock = true,
+            "--lan" => listen = "0.0.0.0:8765".into(),
+            "--local" => listen = "127.0.0.1:8765".into(),
+            "--clear-devices" => clear_devices = true,
+            "--help" => {
+                return Ok(Options {
+                    listen,
+                    path,
+                    mock,
+                    clear_devices,
+                    help: true,
+                })
+            }
+            _ => return Err(format!("未知参数：{arg}")),
+        }
+    }
+    Ok(Options {
+        listen,
+        path,
+        mock,
+        clear_devices,
+        help: false,
+    })
 }
 
 fn start_console(state: &AppState) {
@@ -125,4 +165,51 @@ fn start_console(state: &AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn parse(args: &[&str]) -> Result<Options, String> {
+        parse_args(
+            args.iter().map(|s| s.to_string()),
+            PathBuf::from("config.json"),
+        )
+    }
+    #[test]
+    fn default_is_lan_and_local_is_explicit() {
+        assert_eq!(parse(&[]).unwrap().listen, "0.0.0.0:8765");
+        assert_eq!(parse(&["--local"]).unwrap().listen, "127.0.0.1:8765");
+        assert_eq!(parse(&["--lan"]).unwrap().listen, "0.0.0.0:8765");
+    }
+    #[test]
+    fn last_listen_option_wins_and_other_options_are_preserved() {
+        assert_eq!(
+            parse(&["--local", "--listen", "192.168.1.20:9000"])
+                .unwrap()
+                .listen,
+            "192.168.1.20:9000"
+        );
+        assert_eq!(
+            parse(&["--listen", "[::1]:9000", "--local"])
+                .unwrap()
+                .listen,
+            "127.0.0.1:8765"
+        );
+        assert_eq!(parse(&["--local", "--lan"]).unwrap().listen, "0.0.0.0:8765");
+        let options = parse(&[
+            "--local",
+            "--mock",
+            "--config",
+            "custom.json",
+            "--clear-devices",
+        ])
+        .unwrap();
+        assert!(options.mock && options.clear_devices);
+        assert_eq!(options.path, PathBuf::from("custom.json"));
+        assert!(parse(&["--listen"]).is_err());
+        assert!(parse(&["--config"]).is_err());
+        assert!(parse(&["--unknown"]).is_err());
+        assert!(parse(&["--help"]).unwrap().help);
+    }
 }

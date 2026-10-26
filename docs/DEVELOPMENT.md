@@ -46,7 +46,7 @@ mini-deck/
 └── README.md
 ```
 
-本次 macOS 验证：35 个 Rust 测试、11 个 JavaScript 测试通过；`cargo fmt --check`、macOS 与 Windows MSVC 目标 Clippy（`-D warnings`）、Windows 目标全 targets 编译检查及 JavaScript 语法检查通过。macOS Debug Mock 程序的真实 TCP / SSE 与伪终端验证通过，覆盖运行中刷新配对码、旧码失效、已有会话保留，以及带 SSE 连接的 Ctrl+C 退出。
+本次 macOS 验证：37 个 Rust 测试、11 个 JavaScript 测试通过；`cargo fmt --check`、macOS 与 Windows MSVC 目标 Clippy（`-D warnings`）、Windows 目标全 targets 编译检查及 JavaScript 语法检查通过。macOS Debug Mock 程序的真实 TCP / SSE 与伪终端验证通过，覆盖运行中刷新配对码、旧码失效、已有会话保留，以及带 SSE 连接的 Ctrl+C 退出。
 
 Rust 测试同时覆盖原有快捷键解析、Win32 事件序列、部分注入清理、配置原子替换和认证持久化。测试不向 Windows 注入真实按键。Windows 冒烟脚本已按新 revision 协议更新，本次未在 macOS 执行 PowerShell 脚本。
 
@@ -79,3 +79,5 @@ Rust 测试补充独立按钮版本、旧配置兼容、过期触发拒绝、同
 本次 Windows 目标检查使用 macOS 上的 `cargo check --all-targets --target x86_64-pc-windows-msvc` 和该目标的 Clippy，仅验证条件编译、类型检查与静态诊断。Windows EXE 链接、真实注入、控制台输入和资源占用仍须 Windows 构建及真机确认；历史 0.2.0 的 CI 结果不能当作本次改动的 Windows 执行结果。
 
 导航与编辑键测试补充 PageUp/PageDown、Home/End、Insert/Delete、Backspace 的虚拟键码、扩展标记、释放顺序、缩写兼容，以及网页录制与 API 保存/触发。新增按键仍需在 Windows 目标应用中验证实际效果。
+
+监听参数测试验证默认局域网地址、显式 `--local`、兼容 `--lan`、自定义地址和参数顺序。开发时建议继续显式指定回环地址或 `--local`，避免将 Mock 服务开放给局域网。
