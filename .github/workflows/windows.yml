@@ -17,11 +17,11 @@ jobs:
       - name: 验证 Windows 运行流程与测量脚本
         shell: pwsh
         run: ./scripts/Test-WindowsSmoke.ps1 -ExePath ./target/release/mini-deck.exe
+      - name: 整理 Windows 下载包
+        shell: pwsh
+        run: ./scripts/New-WindowsPackage.ps1 -ExePath ./target/release/mini-deck.exe -OutputDirectory ./dist/package
       - uses: actions/upload-artifact@v4
         with:
           name: mini-deck-windows-x64
-          path: |
-            target/release/mini-deck.exe
-            README.md
-            scripts/Measure-MiniDeck.ps1
-            scripts/启动局域网.cmd
+          path: dist/package/*
+          if-no-files-found: error

@@ -25,11 +25,16 @@ jobs:
       - name: 打包与生成校验值
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path dist/package -Force | Out-Null
+          ./scripts/New-WindowsPackage.ps1 -ExePath ./target/release/mini-deck.exe -OutputDirectory ./dist/package
           Copy-Item target/release/mini-deck.exe dist/mini-deck.exe
-          Copy-Item target/release/mini-deck.exe, README.md, scripts/Measure-MiniDeck.ps1, scripts/启动局域网.cmd dist/package/
           $archive = "mini-deck-windows-x64-$env:GITHUB_REF_NAME.zip"
           Compress-Archive -Path dist/package/* -DestinationPath "dist/$archive"
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path "dist/$archive"))
+          try {
+            $actual = @($zip.Entries | ForEach-Object FullName | Sort-Object)
+            $expected = @('mini-deck.exe', 'README.md', 'Measure-MiniDeck.ps1') | Sort-Object
+            if (Compare-Object $expected $actual) { throw 'ZIP 文件清单或目录层级错误。' }
+          } finally { $zip.Dispose() }
           @('mini-deck.exe', $archive) | ForEach-Object {
             $hash = (Get-FileHash "dist/$_" -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $_"
