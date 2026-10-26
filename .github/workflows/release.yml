@@ -1,0 +1,43 @@
+name: 发布 Windows 版本
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 检查版本号
+        shell: pwsh
+        run: |
+          $package = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0]
+          if ($env:GITHUB_REF_NAME -ne "v$($package.version)") { throw '标签与 Cargo 版本号不一致。' }
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: 验证 Windows 运行流程与测量脚本
+        shell: pwsh
+        run: ./scripts/Test-WindowsSmoke.ps1 -ExePath ./target/release/mini-deck.exe
+      - name: 打包与生成校验值
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist/package -Force | Out-Null
+          Copy-Item target/release/mini-deck.exe dist/mini-deck.exe
+          Copy-Item target/release/mini-deck.exe, README.md, scripts/Measure-MiniDeck.ps1, scripts/启动局域网.cmd dist/package/
+          $archive = "mini-deck-windows-x64-$env:GITHUB_REF_NAME.zip"
+          Compress-Archive -Path dist/package/* -DestinationPath "dist/$archive"
+          @('mini-deck.exe', $archive) | ForEach-Object {
+            $hash = (Get-FileHash "dist/$_" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $_"
+          } | Set-Content dist/SHA256SUMS.txt -Encoding utf8NoBOM
+      - name: 上传 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME dist/mini-deck.exe "dist/mini-deck-windows-x64-$env:GITHUB_REF_NAME.zip" dist/SHA256SUMS.txt --verify-tag --title "Mini Deck $env:GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release 上传失败。' }
