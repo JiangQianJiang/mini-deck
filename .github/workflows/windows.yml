@@ -1,5 +1,11 @@
 name: Windows 构建和测试
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   windows:
     runs-on: windows-latest
@@ -8,7 +14,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked
       - run: cargo build --release --locked
+      - name: 验证 Windows 运行流程与测量脚本
+        shell: pwsh
+        run: ./scripts/Test-WindowsSmoke.ps1 -ExePath ./target/release/mini-deck.exe
       - uses: actions/upload-artifact@v4
         with:
           name: mini-deck-windows-x64
-          path: target/release/mini-deck.exe
+          path: |
+            target/release/mini-deck.exe
+            README.md
+            scripts/Measure-MiniDeck.ps1
+            scripts/启动局域网.cmd
