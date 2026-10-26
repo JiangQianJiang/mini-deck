@@ -28,7 +28,12 @@ const MiniDeckProtocol = (() => {
     };
   }
   const modifiers = ['Ctrl', 'Alt', 'Shift', 'Win'];
-  const mainKeys = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', ...Array.from({length: 12}, (_, i) => `F${i + 1}`), 'Enter', 'Esc', 'Tab', 'Space', 'Left', 'Right', 'Up', 'Down'];
+  const mainKeys = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', ...Array.from({length: 12}, (_, i) => `F${i + 1}`), 'Enter', 'Esc', 'Tab', 'Space', 'Left', 'Right', 'Up', 'Down', 'PageUp', 'PageDown', 'Home', 'End', 'Insert', 'Delete', 'Backspace'];
+  function normalizeKey(value) {
+    const aliases = {PGUP: 'PageUp', PGDN: 'PageDown', PGDOWN: 'PageDown', INS: 'Insert', DEL: 'Delete'};
+    const upper = value.trim().toUpperCase();
+    return aliases[upper] || mainKeys.find(key => key.toUpperCase() === upper);
+  }
   function recorded(event) {
     if (event.repeat || event.isComposing || event.keyCode === 229 || event.key === 'Process' || event.key === 'Dead') return {ignore: true};
     const mods = modifiers.filter((_, i) => [event.ctrlKey, event.altKey, event.shiftKey, event.metaKey][i]);
@@ -40,6 +45,6 @@ const MiniDeckProtocol = (() => {
     if (/^Digit[0-9]$/.test(event.code)) key = event.code.slice(5);
     return mainKeys.includes(key) ? {mods, key} : {mods, error: '不支持此按键，请选择列表中的主键'};
   }
-  return {eventParser, recorded, modifiers, mainKeys};
+  return {eventParser, recorded, modifiers, mainKeys, normalizeKey};
 })();
 if (typeof module !== 'undefined') module.exports = MiniDeckProtocol;

@@ -33,6 +33,13 @@ impl Shortcut {
                 modifiers.push(key);
             } else {
                 let key = match part.as_str() {
+                    "PAGEUP" | "PGUP" => 0x21,
+                    "PAGEDOWN" | "PGDN" | "PGDOWN" => 0x22,
+                    "HOME" => 0x24,
+                    "END" => 0x23,
+                    "INSERT" | "INS" => 0x2d,
+                    "DELETE" | "DEL" => 0x2e,
+                    "BACKSPACE" => 0x08,
                     "ENTER" => 0x0d,
                     "ESC" => 0x1b,
                     "TAB" => 9,
@@ -87,5 +94,5 @@ impl Shortcut {
     }
 }
 fn extended(key: u16) -> bool {
-    matches!(key, 0x25..=0x28 | 0x5b)
+    matches!(key, 0x21..=0x28 | 0x2d..=0x2e | 0x5b)
 }

@@ -24,6 +24,12 @@ Authorization: Bearer <token>
 
 设备到期时间为 UTC Unix 秒。临时会话撤销只更新内存；已记住设备在持久化成功后才返回撤销成功，写盘失败返回 500 并保留原会话。认证变更串行处理。
 
+## 支持的按键
+
+主键支持 A–Z、0–9、F1–F12、Enter、Esc、Tab、Space、方向键 Left/Right/Up/Down，以及 PageUp、PageDown、Home、End、Insert、Delete、Backspace，可与 Ctrl/Alt/Shift/Win 组合。名称不区分大小写；PgUp、PgDn/PgDown、Ins、Del 分别为对应导航/编辑键的别名。网页手动选择和录制支持相同的主键范围。
+
+Win32 虚拟键码依据 [Microsoft 虚拟键码表](https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes)。PageUp/PageDown、Home/End、Insert/Delete 使用独立导航键的扩展标记，Backspace 不设置该标记。
+
 ## 按钮版本与冲突
 
 按钮示例：

@@ -743,3 +743,39 @@ async fn remembered_logout_failure_preserves_session_and_concurrent_auth_changes
     assert!(!restored.valid(&permanent));
     assert!(restored.valid(&new_token));
 }
+
+#[tokio::test]
+async fn navigation_shortcuts_can_be_saved_and_triggered() {
+    let (_dir, app, keyboard, token, _state) = setup(false).await;
+    for (revision, (name, key)) in [
+        ("PageUp", 0x21),
+        ("PageDown", 0x22),
+        ("Home", 0x24),
+        ("End", 0x23),
+        ("Insert", 0x2d),
+        ("Delete", 0x2e),
+        ("Backspace", 0x08),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let body = format!(r#"{{"revision":{revision},"name":"导航","shortcut":"Ctrl+{name}"}}"#);
+        assert_eq!(
+            call(app.clone(), "PUT", "/api/buttons/0", &token, &body)
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        let body = format!(r#"{{"revision":{}}}"#, revision + 1);
+        assert_eq!(
+            call(app.clone(), "POST", "/api/buttons/0/press", &token, &body)
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            keyboard.calls.lock().unwrap().last().unwrap().keys,
+            vec![0x11, key]
+        );
+    }
+}

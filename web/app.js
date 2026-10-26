@@ -97,7 +97,7 @@ function openEditor(item) {
   document.querySelector('#button-name').value = item.name;
   const parts = item.shortcut.split('+').map(s => s.trim().toUpperCase());
   for (const input of modifierInputs) input.checked = parts.includes(input.value.toUpperCase());
-  mainKey.value = MiniDeckProtocol.mainKeys.find(k => k.toUpperCase() === parts.at(-1));
+  mainKey.value = MiniDeckProtocol.normalizeKey(parts.at(-1));
   updatePreview(); editor.showModal(); document.querySelector('#button-name').focus();
 }
 for (const input of [...modifierInputs, mainKey]) input.addEventListener('change', () => { stopRecording(); updatePreview(); });

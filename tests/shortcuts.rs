@@ -19,7 +19,7 @@ fn invalid_shortcuts() {
         "A+B",
         "F0",
         "F13",
-        "Ctrl+Delete",
+        "Ctrl+Unknown",
         "Ctrl+命令",
     ] {
         assert!(Shortcut::parse(value).is_err(), "{value}");
@@ -79,4 +79,53 @@ fn partial_injection_cleanup_and_cleanup_failure() {
     })
     .is_ok());
     assert_eq!(count, 1);
+}
+
+#[test]
+fn navigation_and_editing_keys_have_correct_virtual_keys_and_flags() {
+    for (name, key, extended) in [
+        ("PageUp", 0x21, true),
+        ("PageDown", 0x22, true),
+        ("Home", 0x24, true),
+        ("End", 0x23, true),
+        ("Insert", 0x2d, true),
+        ("Delete", 0x2e, true),
+        ("Backspace", 0x08, false),
+    ] {
+        let shortcut = Shortcut::parse(&format!("Ctrl+Shift+{name}")).unwrap();
+        assert_eq!(shortcut.keys, vec![0x11, 0x10, key]);
+        let events = shortcut.events();
+        assert_eq!(
+            (events[2].key, events[2].up, events[2].extended),
+            (key, false, extended)
+        );
+        assert_eq!(
+            (events[3].key, events[3].up, events[3].extended),
+            (key, true, extended)
+        );
+        assert_eq!(
+            shortcut
+                .releases()
+                .iter()
+                .map(|e| e.key)
+                .collect::<Vec<_>>(),
+            vec![key, 0x10, 0x11]
+        );
+        assert_eq!(
+            Shortcut::parse(&name.to_ascii_lowercase()).unwrap().keys,
+            vec![key]
+        );
+    }
+    for (alias, canonical) in [
+        ("PgUp", "PageUp"),
+        ("PgDn", "PageDown"),
+        ("PgDown", "PageDown"),
+        ("Ins", "Insert"),
+        ("Del", "Delete"),
+    ] {
+        assert_eq!(
+            Shortcut::parse(alias).unwrap(),
+            Shortcut::parse(canonical).unwrap()
+        );
+    }
 }

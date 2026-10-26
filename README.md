@@ -49,7 +49,7 @@ Mini Deck 使用 Rust 编写，调用 Win32 `SendInput` 发送按键。Windows �
 
 其他设备修改后页面会自动同步。点击遇到版本冲突时不会执行按键，刷新按钮后需要你再次确认点击；编辑遇到冲突时保留草稿，可核对服务端最新配置，再选择使用最新版本保存。不会自动重试按键或静默覆盖他人编辑。同步重连达到上限时，请点击“重新连接”；页面重新可见时也会重新获取配置。
 
-支持 `Ctrl`、`Alt`、`Shift`、`Win` 与一个主键组合：`A–Z`、`0–9`、`F1–F12`、`Enter`、`Esc`、`Tab`、`Space`、`Left`、`Right`、`Up`、`Down`。例如 `Ctrl+C`、`Ctrl+Shift+Esc`。
+支持 `Ctrl`、`Alt`、`Shift`、`Win` 与一个主键组合：`A–Z`、`0–9`、`F1–F12`、`Enter`、`Esc`、`Tab`、`Space`、`Left`、`Right`、`Up`、`Down`、`PageUp`、`PageDown`、`Home`、`End`、`Insert`、`Delete`、`Backspace`。例如 `Ctrl+C`、`Ctrl+Shift+Esc`、`Ctrl+PageDown`。配置文件与 API 也接受 `PgUp`、`PgDn` / `PgDown`、`Ins`、`Del` 缩写。
 
 ### 4. 退出与升级
 

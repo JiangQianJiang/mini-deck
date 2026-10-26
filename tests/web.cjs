@@ -29,10 +29,19 @@ test('录制范围与后端一致，Esc 和 Meta 可录入', () => {
     const browserKey = {Esc: 'Escape', Space: ' ', Left: 'ArrowLeft', Right: 'ArrowRight', Up: 'ArrowUp', Down: 'ArrowDown'}[key] || key;
     assert.equal(recorded({key: browserKey}).key, key);
   }
-  assert.ok(recorded({key: 'Delete'}).error);
+  assert.ok(recorded({key: 'Unidentified'}).error);
 });
 test('长按与输入法组合不完成录制', () => {
   for (const event of [{key: 'a', repeat: true}, {key: 'a', isComposing: true}, {keyCode: 229}, {key: 'Process'}, {key: 'Dead'}]) {
     assert.deepEqual(recorded(event), {ignore: true});
   }
+});
+
+test('导航键录制保留修饰键，常见缩写可在编辑器恢复', () => {
+  const {normalizeKey} = require('../web/protocol.js');
+  for (const key of ['PageUp', 'PageDown', 'Home', 'End', 'Insert', 'Delete', 'Backspace']) {
+    assert.ok(mainKeys.includes(key));
+    assert.deepEqual(recorded({key, ctrlKey: true, shiftKey: true}), {mods: ['Ctrl', 'Shift'], key});
+  }
+  for (const [alias, key] of [['PgUp', 'PageUp'], ['pgdn', 'PageDown'], ['PgDown', 'PageDown'], ['ins', 'Insert'], ['DEL', 'Delete']]) assert.equal(normalizeKey(alias), key);
 });
