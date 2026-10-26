@@ -1,0 +1,4 @@
+/target
+/config.json
+/config.json.tmp
+*.csv
