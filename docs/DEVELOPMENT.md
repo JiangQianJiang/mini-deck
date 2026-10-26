@@ -37,7 +37,7 @@ mini-deck/
 ├── scripts/
 │   ├── Measure-MiniDeck.ps1
 │   ├── Test-WindowsSmoke.ps1
-│   └── 启动局域网.cmd
+│   └── New-WindowsPackage.ps1
 ├── .cargo/config.toml
 ├── .github/workflows/{windows.yml,release.yml}
 ├── docs/{API.md,DEVELOPMENT.md,PERFORMANCE.md,SECURITY.md}
@@ -81,3 +81,9 @@ Rust 测试补充独立按钮版本、旧配置兼容、过期触发拒绝、同
 导航与编辑键测试补充 PageUp/PageDown、Home/End、Insert/Delete、Backspace 的虚拟键码、扩展标记、释放顺序、缩写兼容，以及网页录制与 API 保存/触发。新增按键仍需在 Windows 目标应用中验证实际效果。
 
 监听参数测试验证默认局域网地址、显式 `--local`、兼容 `--lan`、自定义地址和参数顺序。开发时建议继续显式指定回环地址或 `--local`，避免将 Mock 服务开放给局域网。
+
+## Windows 下载包布局
+
+普通构建和 Release 共用 `scripts/New-WindowsPackage.ps1`，只向全新的输出目录复制三个文件：`mini-deck.exe`、`README.md`、`Measure-MiniDeck.ps1`。不再分发已无必要的局域网启动脚本，直接双击 EXE 即使用默认局域网模式。
+
+Actions 仅上传整理目录中的文件，不直接上传源码路径，避免产物保留 `target/release/` 和 `scripts/` 层级。Release 在压缩后检查 ZIP 条目清单，拒绝错误的目录层级或多余文件。
