@@ -2,6 +2,12 @@
 
 轻量 Windows 局域网快捷键控制器。Rust 原生程序直接提供手机网页，通过 Win32 `SendInput` 向电脑当前前台窗口发送快捷键。没有 Node、Python、浏览器运行时、数据库、插件或后台前端服务。
 
+## Windows 直接下载
+
+登录仓库所属的 GitHub 账号，打开仓库的 **Actions → Windows 构建和测试**，选择最近一次成功运行，在页面底部 **Artifacts** 下载 `mini-deck-windows-x64`。解压后得到 `mini-deck.exe`，不需要安装 Rust。当前仓库为私有，需要使用有访问权限的 GitHub 账号。
+
+在可写目录运行 EXE。手机连接同一局域网时，按下文指定电脑局域网 IP；直接双击默认仅供电脑本机访问。
+
 ## 构建与运行
 
 Windows 10/11 x64 开发机安装 Rust stable MSVC 工具链和 Visual Studio C++ Build Tools：
@@ -29,7 +35,7 @@ cargo run -- --mock --listen 127.0.0.1:8765 --config ./config.json
 cargo check --locked --target x86_64-pc-windows-msvc
 ```
 
-macOS 上 Windows 目标的 `cargo check` 只检查编译类型，不链接 EXE。真正的 EXE 在 Windows 构建；附带 GitHub Actions Windows 测试/Release 构建工作流，推送至 GitHub 后可下载 artifact。当前没有将此工作流提交到远程或运行。
+macOS 上 Windows 目标的 `cargo check` 只检查编译类型，不链接 EXE。真正的 EXE 在 Windows 构建；附带 GitHub Actions Windows 测试/Release 构建工作流，推送至 GitHub 后可下载 artifact。仓库已上传至 https://github.com/JiangQianJiang/mini-deck，Windows 自动构建状态请查看仓库 Actions。CI 不会注入真实按键，也不替代 Windows 真机性能测试。
 
 ## 使用和安全边界
 
