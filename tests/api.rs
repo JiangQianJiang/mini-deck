@@ -185,9 +185,9 @@ async fn backend_failure_releases_serialization_guard() {
 #[tokio::test]
 async fn disk_failure_keeps_memory_and_keyboard_usable() {
     let (_dir, app, _, token, state) = setup(false).await;
-    tokio::fs::write(state.path.with_extension("json.tmp"), b"x")
-        .await
-        .unwrap();
+    let original = tokio::fs::read(&state.path).await.unwrap();
+    tokio::fs::remove_file(&state.path).await.unwrap();
+    tokio::fs::create_dir(&state.path).await.unwrap();
     assert_eq!(
         call(
             app.clone(),
@@ -201,6 +201,8 @@ async fn disk_failure_keeps_memory_and_keyboard_usable() {
         StatusCode::INTERNAL_SERVER_ERROR
     );
     assert_eq!(state.config.lock().await.buttons[0].name, "复制");
+    tokio::fs::remove_dir(&state.path).await.unwrap();
+    tokio::fs::write(&state.path, original).await.unwrap();
     assert_eq!(
         call(app, "POST", "/api/buttons/0/press", &token, "")
             .await
@@ -248,4 +250,136 @@ fn pairing_limits_and_revocation() {
         auth.pair(&code).unwrap();
     }
     assert!(auth.pair(&code).is_err());
+}
+
+async fn response_json(response: axum::response::Response) -> serde_json::Value {
+    serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+}
+#[tokio::test]
+async fn remembered_device_restart_and_revoke() {
+    let (_dir, app, keyboard, temporary, state) = setup(false).await;
+    let code = state.auth.lock().await.code.clone();
+    let response = call(
+        app.clone(),
+        "POST",
+        "/api/pair",
+        "",
+        &format!(r#"{{"code":"{code}","remember":true,"name":"平板"}}"#),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let token = response_json(response).await["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let sessions = mini_deck::auth::session_path(&state.path);
+    let saved = tokio::fs::read_to_string(&sessions).await.unwrap();
+    assert!(!saved.contains(&token));
+    assert!(!saved.contains(&temporary));
+    let restarted = AppState::new(
+        Config::load(&state.path).await.unwrap(),
+        Auth::load(&sessions).await.unwrap(),
+        keyboard,
+        state.path.clone(),
+    );
+    let app = router(restarted);
+    assert_eq!(
+        call(app.clone(), "GET", "/api/buttons", &temporary, "")
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let response = call(app.clone(), "GET", "/api/devices", &token, "").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let devices = response_json(response).await;
+    assert_eq!(devices.as_array().unwrap().len(), 1);
+    assert_eq!(devices[0]["current"], true);
+    assert!(devices[0].get("digest").is_none());
+    let id = devices[0]["id"].as_str().unwrap();
+    assert_eq!(
+        call(
+            app.clone(),
+            "DELETE",
+            &format!("/api/devices/{id}"),
+            &token,
+            ""
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(app, "GET", "/api/buttons", &token, "").await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(!Auth::load(&sessions).await.unwrap().valid(&token));
+}
+#[tokio::test]
+async fn remembered_pairing_disk_failure_rolls_back_and_retry_succeeds() {
+    let (_dir, app, _, token, state) = setup(false).await;
+    let path = mini_deck::auth::session_path(&state.path);
+    tokio::fs::create_dir(&path).await.unwrap();
+    let code = state.auth.lock().await.code.clone();
+    let body = format!(r#"{{"code":"{code}","remember":true,"name":"手机"}}"#);
+    assert_eq!(
+        call(app.clone(), "POST", "/api/pair", "", &body)
+            .await
+            .status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(state.auth.lock().await.devices(&token).len(), 1);
+    assert_eq!(
+        call(app.clone(), "POST", "/api/buttons/0/press", &token, "")
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    tokio::fs::remove_dir(&path).await.unwrap();
+    assert_eq!(
+        call(app, "POST", "/api/pair", "", &body).await.status(),
+        StatusCode::OK
+    );
+}
+#[tokio::test]
+async fn failed_revoke_preserves_auth_until_durably_saved() {
+    let (_dir, app, _, token, state) = setup(false).await;
+    let id = state.auth.lock().await.devices(&token)[0].id.clone();
+    let path = mini_deck::auth::session_path(&state.path);
+    tokio::fs::create_dir(&path).await.unwrap();
+    assert_eq!(
+        call(
+            app.clone(),
+            "DELETE",
+            &format!("/api/devices/{id}"),
+            &token,
+            ""
+        )
+        .await
+        .status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert!(state.auth.lock().await.valid(&token));
+    tokio::fs::remove_dir(&path).await.unwrap();
+    assert_eq!(
+        call(app, "DELETE", &format!("/api/devices/{id}"), &token, "")
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+}
+#[tokio::test]
+async fn device_management_requires_authentication() {
+    let (_dir, app, _, _, _) = setup(false).await;
+    assert_eq!(
+        call(app.clone(), "GET", "/api/devices", "", "")
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        call(app, "DELETE", "/api/devices/test", "", "")
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
 }

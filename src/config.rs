@@ -83,51 +83,10 @@ impl Config {
         }
     }
     pub async fn save(&self, path: &Path) -> Result<(), String> {
-        use tokio::io::AsyncWriteExt;
         self.validate()?;
         let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        let temp = path.with_extension("json.tmp");
-        let result = async {
-            let mut file = tokio::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp)
-                .await?;
-            file.write_all(&bytes).await?;
-            file.sync_all().await?;
-            drop(file);
-            #[cfg(not(windows))]
-            tokio::fs::rename(&temp, path).await?;
-            #[cfg(windows)]
-            {
-                let from_path = temp.clone();
-                let to_path = path.to_path_buf();
-                tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-                    use std::os::windows::ffi::OsStrExt;
-                    let from: Vec<u16> =
-                        from_path.as_os_str().encode_wide().chain(Some(0)).collect();
-                    let to: Vec<u16> = to_path.as_os_str().encode_wide().chain(Some(0)).collect();
-                    // FFI 边界：以零结尾的路径在调用期间有效。
-                    let ok = unsafe {
-                        windows_sys::Win32::Storage::FileSystem::MoveFileExW(
-                            from.as_ptr(),
-                            to.as_ptr(),
-                            windows_sys::Win32::Storage::FileSystem::MOVEFILE_REPLACE_EXISTING
-                                | windows_sys::Win32::Storage::FileSystem::MOVEFILE_WRITE_THROUGH,
-                        )
-                    };
-                    if ok == 0 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                })
-                .await
-                .map_err(std::io::Error::other)??;
-            }
-            Ok::<(), std::io::Error>(())
-        }
-        .await;
-        // 不删除其他进程创建的临时文件；残留文件需要人工检查后清除。
-        result.map_err(|e| format!("配置保存失败：{e}；请检查临时文件 {}", temp.display()))
+        crate::storage::write_atomic(path, bytes)
+            .await
+            .map_err(|e| format!("配置保存失败：{e}"))
     }
 }

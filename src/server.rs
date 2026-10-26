@@ -16,6 +16,8 @@ pub struct AppState {
     pub keyboard: Arc<dyn KeyboardBackend>,
     pub injection: Arc<Mutex<()>>,
     pub updates: Arc<Mutex<()>>,
+    pub auth_updates: Arc<Mutex<()>>,
+    pub connect_page: Arc<String>,
     pub path: PathBuf,
 }
 impl AppState {
@@ -31,6 +33,8 @@ impl AppState {
             keyboard,
             injection: Arc::new(Mutex::new(())),
             updates: Arc::new(Mutex::new(())),
+            auth_updates: Arc::new(Mutex::new(())),
+            connect_page: Arc::new(String::from("连接信息尚未初始化")),
             path,
         }
     }
@@ -80,6 +84,9 @@ pub fn router(state: AppState) -> Router {
                 )
             }),
         )
+        .route("/connect", get(connect))
+        .route("/api/devices", get(devices))
+        .route("/api/devices/{id}", axum::routing::delete(revoke))
         .route("/api/health", get(health))
         .route("/api/pair", post(pair))
         .route("/api/logout", post(logout))
@@ -123,23 +130,82 @@ async fn security_headers(
 #[serde(deny_unknown_fields)]
 struct PairRequest {
     code: String,
+    #[serde(default)]
+    remember: bool,
+    #[serde(default = "default_device_name")]
+    name: String,
+}
+fn default_device_name() -> String {
+    "浏览器设备".into()
+}
+async fn persist_auth(state: &AppState, auth: &Auth) -> Result<(), ApiError> {
+    let bytes = auth
+        .snapshot()
+        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    crate::storage::write_atomic(&crate::auth::session_path(&state.path), bytes)
+        .await
+        .map_err(|e| {
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("设备保存失败：{e}"),
+            )
+        })
 }
 async fn pair(
     State(state): State<AppState>,
     Json(body): Json<PairRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let token = state
-        .auth
-        .lock()
-        .await
-        .pair(&body.code)
-        .map_err(|e| error(StatusCode::TOO_MANY_REQUESTS, e))?;
-    Ok(Json(serde_json::json!({"token":token})))
+    let _update = state.auth_updates.lock().await;
+    let (token, snapshot) = {
+        let mut auth = state.auth.lock().await;
+        let token = auth
+            .pair_device(&body.code, body.remember, &body.name)
+            .map_err(|e| error(StatusCode::TOO_MANY_REQUESTS, e))?;
+        (token, auth.clone())
+    };
+    if body.remember {
+        if let Err(error) = persist_auth(&state, &snapshot).await {
+            state.auth.lock().await.logout(&token);
+            return Err(error);
+        }
+    }
+    Ok(Json(
+        serde_json::json!({"token":token,"remembered":body.remember}),
+    ))
 }
 async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<StatusCode, ApiError> {
+    let _update = state.auth_updates.lock().await;
     authorize(&state, &headers).await?;
-    state.auth.lock().await.logout(token(&headers));
+    let mut updated = state.auth.lock().await.clone();
+    updated.logout(token(&headers));
+    persist_auth(&state, &updated).await?;
+    *state.auth.lock().await = updated;
     Ok(StatusCode::NO_CONTENT)
+}
+async fn devices(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<crate::auth::Device>>, ApiError> {
+    authorize(&state, &headers).await?;
+    Ok(Json(state.auth.lock().await.devices(token(&headers))))
+}
+async fn revoke(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let _update = state.auth_updates.lock().await;
+    authorize(&state, &headers).await?;
+    let mut updated = state.auth.lock().await.clone();
+    if !updated.revoke(&id) {
+        return Err(error(StatusCode::NOT_FOUND, "设备不存在"));
+    }
+    persist_auth(&state, &updated).await?;
+    *state.auth.lock().await = updated;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn connect(State(state): State<AppState>) -> axum::response::Html<String> {
+    axum::response::Html(state.connect_page.as_ref().clone())
 }
 async fn buttons(
     State(state): State<AppState>,
